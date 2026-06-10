@@ -1,0 +1,15 @@
+# core
+torch>=2.2
+numpy
+
+# tokenizer (Milestone 1)
+sentencepiece
+
+# corpus download (Milestone 2) — HuggingFace datasets for Wikipedia / WikiText
+datasets
+
+# utilities
+tqdm
+
+# optional: experiment logging (Milestone 4). Uncomment if you want it.
+# wandb

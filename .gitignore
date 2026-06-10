@@ -1,0 +1,24 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# trained artifacts — users train their own; keep the repo light
+*.pt
+*.ckpt
+checkpoints/
+
+# tokenizer artifacts (Milestone 1)
+*.model
+*.vocab
+tokenizer/
+
+# data + token shards (Milestone 2)
+data/
+*.bin
+*.npy
+
+# logs
+wandb/
+*.log
