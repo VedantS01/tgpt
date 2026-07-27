@@ -42,12 +42,27 @@ Modern toggles (off by default = faithful GPT-2 baseline; flipped on in Mileston
 
 Each milestone is a set of `TODO(Mx)` blocks to implement. See [`docs/milestones.md`](docs/milestones.md).
 
-- [ ] **M1 — Tokenizer** · train SentencePiece BPE; encode/decode round-trip — `tgpt/tokenizer.py`
+- [x] **M1 — Tokenizer** · train SentencePiece BPE; encode/decode round-trip — `tgpt/tokenizer.py`
 - [ ] **M2 — Data pipeline** · corpus → tokenized `.bin` shards + memmap dataloader — `tgpt/data.py`
 - [ ] **M3 — Model (GPT-2 baseline)** · attention, MLP, block, full model — `tgpt/model.py`
 - [ ] **M4 — Training loop** · bf16, grad-accum, clip, AdamW groups, LR schedule, ckpt, eval — `tgpt/train.py`
 - [ ] **M5 — Modernize** · RoPE, RMSNorm, SwiGLU, QK-norm, no-bias, Muon — toggles in `model.py`/`train.py`
 - [ ] **M6 — Scale & generate** · bigger run, sampling, eval; the showcase — `tgpt/sample.py`
+
+### M1 results
+
+16k-piece BPE vocabulary trained on WikiText-103 (538M chars), with byte-fallback and
+`unk=0, bos=1, eos=2` (pad disabled — GPT-style training windows are always full):
+
+```
+"The history of artificial intelligence began in antiquity."
+  → ▁The ▁history ▁of ▁artificial ▁intelligence ▁began ▁in ▁antiqu ity .   (10 tokens)
+"naïve café — résumé 😀 日本語"
+  → round-trips exactly via byte-fallback pieces like <0xF0><0x9F><0x98><0x80>
+```
+
+Common words are single tokens; rare words split into meaningful chunks; anything outside
+the learned vocabulary decomposes to bytes, so `decode(encode(s)) == s` always.
 
 ## Quickstart (once implemented)
 
