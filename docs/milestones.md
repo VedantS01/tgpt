@@ -16,6 +16,21 @@ Train a SentencePiece BPE tokenizer on the corpus; encode/decode round-trip.
 - **See:** a sentence split into subword pieces; `decode(encode(s)) == s`.
 - **Learn:** subword vocabularies, BPE merges, vocab-size trade-offs, special tokens, byte-fallback.
 
+## M1b — Code-aware tokenizer  ·  `tgpt/code_tokenizer.py`
+A second tokenizer, byte-level BPE (GPT-2/GPT-4 lineage) trained on code + prose, built to a
+design spec: whitespace ladder, operators and closers as single tokens, all Python/C++/JS
+keywords whole, identifiers deliberately split. Kept *alongside* M1 rather than replacing it,
+so the two can be measured against each other.
+- **Build:** `build_pattern` (the pre-tokenization regex — where every requirement lives),
+  `train_code_tokenizer`, `CodeTokenizer`, plus `tgpt/langspec.py` (the spec as data).
+- **Run:** `python -m scripts.fetch_code_corpus` → `python -m scripts.train_code_tokenizer`
+  → `python -m scripts.eval_tokenizer`.
+- **See:** bytes-per-token per language vs. the M1 baseline; a spec-compliance audit; exact
+  round-trip on nasty inputs (CRLF, tabs, nested quotes, emoji in string literals).
+- **Learn:** why the pre-tokenizer — not the vocabulary — decides tokenizer quality; how a
+  corpus bounds what any tokenizer can learn; how vocabulary size trades against model size.
+- **Read:** [`docs/tokenizer-design.md`](tokenizer-design.md).
+
 ## M2 — Data pipeline  ·  `tgpt/data.py`
 Corpus → flat token array → `train.bin` / `val.bin` (uint16 memmap) → batched windows.
 - **Build:** `download_corpus`, `prepare`, `get_batch`.

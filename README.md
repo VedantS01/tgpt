@@ -64,6 +64,29 @@ Each milestone is a set of `TODO(Mx)` blocks to implement. See [`docs/milestones
 Common words are single tokens; rare words split into meaningful chunks; anything outside
 the learned vocabulary decomposes to bytes, so `decode(encode(s)) == s` always.
 
+### M1b results — a code-aware tokenizer
+
+A second tokenizer, byte-level BPE trained on 141 MB of Python + C++ + JS + prose, built to
+a spec: whitespace ladder, operators and closers whole, all keywords whole, identifiers
+deliberately split. Bytes per token on held-out files (higher is better):
+
+| tokenizer | c++ | javascript | python | prose |
+|---|---|---|---|---|
+| M1 sentencepiece / wiki, 16k | 1.91 | 2.04 | 2.01 | **4.37** |
+| M1b byte-level / code, 32k | **3.16** | **3.71** | **3.50** | 4.19 |
+| | **+66%** | **+82%** | **+74%** | −4% |
+
+Two things fell out of building it, both written up in
+[`docs/tokenizer-design.md`](docs/tokenizer-design.md):
+
+- **The M1 tokenizer was silently destroying whitespace.** `"a\nb"` decoded to `"a b"`,
+  `"\n\n\n"` to `""`. Two SentencePiece defaults (`remove_extra_whitespaces`, and the
+  `nmt_nfkc` normalizer rewriting control characters) — now fixed, with round-trip
+  in the test set.
+- **The requested 1/3/7/11/…/27 space ladder is exactly right, and 4n−1 is why.** A
+  GPT-4-style regex stops indentation one space short because that space glues to the
+  following word, so those rungs make any indent depth 1–7 a single token.
+
 ## Quickstart (once implemented)
 
 ```bash

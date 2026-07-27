@@ -47,6 +47,17 @@ def train_tokenizer(
         model_type=model_type,
         character_coverage=character_coverage,
         byte_fallback=True,
+        # SentencePiece defaults to remove_extra_whitespaces=True, which silently
+        # collapses every whitespace run: "a\nb" round-trips as "a b" and "\n\n\n"
+        # as "". That erases line and paragraph structure the model should be
+        # learning, and would delete indentation outright on any code. Both flags
+        # below are required for decode(encode(s)) == s to hold on real text.
+        remove_extra_whitespaces=False,
+        allow_whitespace_only_pieces=True,
+        # ...and even with those two, the default `nmt_nfkc` normalizer still
+        # rewrites control characters, so tabs and newlines never survive. Only
+        # `identity` leaves the bytes alone, which is what makes round-trip exact.
+        normalization_rule_name="identity",
         pad_id=PAD_ID,
         unk_id=UNK_ID,
         bos_id=BOS_ID,
