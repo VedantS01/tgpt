@@ -43,7 +43,7 @@ Modern toggles (off by default = faithful GPT-2 baseline; flipped on in Mileston
 Each milestone is a set of `TODO(Mx)` blocks to implement. See [`docs/milestones.md`](docs/milestones.md).
 
 - [x] **M1 — Tokenizer** · train SentencePiece BPE; encode/decode round-trip — `tgpt/tokenizer.py`
-- [ ] **M2 — Data pipeline** · corpus → tokenized `.bin` shards + memmap dataloader — `tgpt/data.py`
+- [x] **M2 — Data pipeline** · corpus → tokenized `.bin` shards + memmap dataloader — `tgpt/data.py`
 - [ ] **M3 — Model (GPT-2 baseline)** · attention, MLP, block, full model — `tgpt/model.py`
 - [ ] **M4 — Training loop** · bf16, grad-accum, clip, AdamW groups, LR schedule, ckpt, eval — `tgpt/train.py`
 - [ ] **M5 — Modernize** · RoPE, RMSNorm, SwiGLU, QK-norm, no-bias, Muon — toggles in `model.py`/`train.py`
@@ -87,6 +87,34 @@ Two things fell out of building it, both written up in
   GPT-4-style regex stops indentation one space short because that space glues to the
   following word, so those rungs make any indent depth 1–7 a single token.
 
+### M2 results — corpus to token shards
+
+139 MB of Python, C++, JavaScript and Wikipedia prose, split into documents,
+shuffled, and tokenized into `uint16` memmap shards:
+
+| source | tokens | share | bytes/token |
+|---|---|---|---|
+| python.txt | 17.1M | 45.3% | 3.51 |
+| prose.txt | 9.5M | 25.2% | 4.22 |
+| javascript.txt | 7.3M | 19.3% | 3.44 |
+| cpp.txt | 3.9M | 10.3% | 3.59 |
+| **total** | **37.8M** | 36,078 documents | |
+
+`python -m scripts.inspect_data` checks the four things that fail silently rather
+than loudly — the shards decode back to text, `y` really is `x` shifted by one,
+EOS lands at document boundaries (19,685 found vs 19,103 expected), and every id
+is inside the vocabulary.
+
+Two decisions are written up in [`docs/data-pipeline.md`](docs/data-pipeline.md):
+
+- **Documents get shuffled before the train/val split, not after.** Each source is
+  contiguous on disk, so slicing the tail of the token array would give you a
+  validation set made of one language — and every later decision would be made on
+  that number.
+- **The corpus is 5× too small for the model it is meant to train.** 37.8M tokens
+  is Chinchilla-optimal for 1.9M parameters; the tiny config is 10.6M. `prepare`
+  prints that on every run rather than letting a training run discover it.
+
 ## Quickstart (once implemented)
 
 ```bash
@@ -96,8 +124,9 @@ pip install -r requirements.txt
 # M1: train the tokenizer on the corpus
 python -m scripts.train_tokenizer
 
-# M2: tokenize + shard the corpus into binary files
+# M2: tokenize + shard the corpus into binary files, then look at what came out
 python -m scripts.prepare_data
+python -m scripts.inspect_data
 
 # M4/M6: train
 python -m tgpt.train

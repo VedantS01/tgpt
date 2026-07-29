@@ -33,10 +33,14 @@ so the two can be measured against each other.
 
 ## M2 — Data pipeline  ·  `tgpt/data.py`
 Corpus → flat token array → `train.bin` / `val.bin` (uint16 memmap) → batched windows.
-- **Build:** `download_corpus`, `prepare`, `get_batch`.
-- **Run:** `python -m scripts.prepare_data` → `data/*.bin`.
-- **See:** token counts; a sampled `(x, y)` batch where `y` is `x` shifted by one.
-- **Learn:** memory-mapping, why uint16, document separators, train/val split, the next-token target.
+- **Build:** `download_corpus`, `prepare`, `get_batch` (+ `load_meta`).
+- **Run:** `python -m scripts.prepare_data` → `data/shards/*.bin`, then
+  `python -m scripts.inspect_data` to look at what came out.
+- **See:** the source mixture and its token counts; a decoded window; `y` proved to be
+  `x` shifted by one; EOS landing at document boundaries.
+- **Learn:** memory-mapping, why uint16, document separators, why the train/val split
+  must happen *after* shuffling documents, the next-token target.
+- **Read:** [`docs/data-pipeline.md`](data-pipeline.md).
 
 ## M3 — Model (GPT-2 baseline)  ·  `tgpt/model.py`
 The faithful GPT-2 decoder: token + learned position embeddings, pre-norm blocks

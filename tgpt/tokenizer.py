@@ -99,6 +99,32 @@ class Tokenizer:
             ids = ids + [self.eos_id]
         return ids
 
+    def encode_batch(
+        self, texts: list[str], add_bos: bool = False, add_eos: bool = False
+    ) -> list[list[int]]:
+        """Encode many texts at once — SentencePiece releases the GIL and threads it."""
+        batch = self.sp.encode(texts, out_type=int, num_threads=os.cpu_count())
+        if add_bos:
+            batch = [[self.bos_id] + ids for ids in batch]
+        if add_eos:
+            batch = [ids + [self.eos_id] for ids in batch]
+        return batch
+
     def decode(self, ids: list[int]) -> str:
         """List of token ids -> text (special tokens are dropped by SentencePiece)."""
         return self.sp.decode(ids)
+
+
+def load_tokenizer(path: str):
+    """Load whichever tokenizer `path` points at.
+
+    The project has two: the M1 SentencePiece model (`.model`) and the M1b
+    code-aware byte-level BPE (`.json`). They expose the same interface on
+    purpose, so everything downstream — the data pipeline, training, sampling —
+    only needs to be told a path, never which family it belongs to.
+    """
+    if path.endswith(".json"):
+        from .code_tokenizer import CodeTokenizer
+
+        return CodeTokenizer(path)
+    return Tokenizer(path)

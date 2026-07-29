@@ -91,6 +91,21 @@ SPECIALS = ["<unk>", "<bos>", "<eos>"]
 UNK_ID, BOS_ID, EOS_ID = 0, 1, 2
 
 
+def _documents(corpus_files: list[str], block: int = 1 << 22):
+    """Stream `corpus_files` as documents, splitting on the corpus separator byte."""
+    from .data import DOC_SEP
+
+    for path in corpus_files:
+        buf = ""
+        with open(path, encoding="utf-8", errors="replace") as f:
+            while chunk := f.read(block):
+                buf += chunk
+                *done, buf = buf.split(DOC_SEP)
+                yield from (d for d in done if d)
+        if buf:
+            yield buf
+
+
 def train_code_tokenizer(
     corpus_files: list[str],
     out_path: str,
@@ -113,7 +128,11 @@ def train_code_tokenizer(
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
         show_progress=True,
     )
-    tok.train(corpus_files, trainer)
+    # Feed documents rather than raw files: the corpus stores NUL between documents
+    # (see tgpt.data.DOC_SEP) and the tokenizer should never see that byte, or it
+    # would spend merges learning it. Splitting here also stops BPE from learning
+    # pairs that straddle two unrelated files.
+    tok.train_from_iterator(_documents(corpus_files), trainer)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     tok.save(out_path)
@@ -144,6 +163,17 @@ class CodeTokenizer:
         if add_eos:
             ids = ids + [self.eos_id]
         return ids
+
+    def encode_batch(
+        self, texts: list[str], add_bos: bool = False, add_eos: bool = False
+    ) -> list[list[int]]:
+        """Encode many texts at once — the Rust backend threads this internally."""
+        batch = [e.ids for e in self.tok.encode_batch(texts, add_special_tokens=False)]
+        if add_bos:
+            batch = [[self.bos_id] + ids for ids in batch]
+        if add_eos:
+            batch = [ids + [self.eos_id] for ids in batch]
+        return batch
 
     def decode(self, ids: list[int]) -> str:
         return self.tok.decode(ids, skip_special_tokens=True)

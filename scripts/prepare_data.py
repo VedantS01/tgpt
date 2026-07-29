@@ -1,24 +1,55 @@
 """Entrypoint — tokenize the corpus into binary shards (Milestone 2).
 
-    python -m scripts.prepare_data
+    python -m scripts.prepare_data                       # code+prose mixture, code tokenizer
+    python -m scripts.prepare_data --tokenizer tokenizer/tgpt.model --out data/wiki
+    python -m scripts.prepare_data --sources data/corpus.txt
 
-Requires the tokenizer from Milestone 1. Produces data/train.bin and data/val.bin.
+Produces `<out>/train.bin`, `<out>/val.bin` (uint16 token ids) and `<out>/meta.json`.
+
+The default mixture is `data/code/*.txt` — Python, C++, JavaScript and Wikipedia
+prose — which is the corpus the M1b tokenizer was built for. Because the shards
+are keyed to a tokenizer, swapping tokenizers means re-running this with a
+different `--out`; keeping both around is what makes the M1-vs-M1b comparison
+measurable at the loss level rather than only in bytes per token.
 """
 
+import argparse
+import glob
 import os
-from tgpt.data import download_corpus, prepare
 
-CORPUS_PATH = "data/corpus.txt"
-TOKENIZER_PATH = "tokenizer/tgpt.model"
-OUT_DIR = "data"
+from tgpt.data import prepare
+
+DEFAULT_SOURCES = "data/code/*.txt"
+CODE_TOKENIZER = "tokenizer/tgpt-code-32000.json"
+WIKI_TOKENIZER = "tokenizer/tgpt.model"
 
 
 def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
-    if not os.path.exists(CORPUS_PATH):
-        download_corpus(CORPUS_PATH, source="wikitext-103")
-    prepare(CORPUS_PATH, TOKENIZER_PATH, OUT_DIR)
-    print(f"token shards written -> {OUT_DIR}/train.bin, {OUT_DIR}/val.bin")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sources", nargs="+", default=[DEFAULT_SOURCES],
+                    help="corpus files or globs (default: data/code/*.txt)")
+    ap.add_argument("--tokenizer", default=None,
+                    help=f"default: {CODE_TOKENIZER}, falling back to {WIKI_TOKENIZER}")
+    ap.add_argument("--out", default="data/shards", help="output directory for the .bin shards")
+    ap.add_argument("--val-fraction", type=float, default=0.04,
+                    help="share of DOCUMENTS held out (not tokens); lower it as the corpus grows")
+    ap.add_argument("--seed", type=int, default=1337)
+    args = ap.parse_args()
+
+    tokenizer = args.tokenizer
+    if tokenizer is None:
+        tokenizer = CODE_TOKENIZER if os.path.exists(CODE_TOKENIZER) else WIKI_TOKENIZER
+    if not os.path.exists(tokenizer):
+        raise SystemExit(f"{tokenizer} not found — train a tokenizer first (M1 / M1b).")
+
+    paths = sorted({p for pattern in args.sources for p in glob.glob(pattern)})
+    if not paths:
+        raise SystemExit(
+            f"no corpus files matched {args.sources} — run: python -m scripts.fetch_code_corpus"
+        )
+
+    prepare(paths, tokenizer, args.out, val_fraction=args.val_fraction, seed=args.seed)
+    print(f"\ntoken shards -> {args.out}/train.bin, {args.out}/val.bin, {args.out}/meta.json")
 
 
 if __name__ == "__main__":
