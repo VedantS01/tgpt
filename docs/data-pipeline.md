@@ -29,16 +29,16 @@ Without boundaries the model has no signal for "this text is finished", which is
 precisely what generation needs in order to stop. It would also learn that a
 Python file is routinely followed mid-thought by a C++ header.
 
-Recovering them cost something. WikiText-103 ships as one line per paragraph with
-no article markers except the headings themselves, so `download_corpus` detects
-top-level ` = Title = ` lines — exactly one `=` per side, since ` = = Section = = `
-is the same article — and cuts there. That turns a flat stream of paragraphs back
-into **29,444 articles**.
+Most sources give boundaries for free — one dataset record is one document. The
+exception is WikiText-103, which ships as one line per paragraph with no article
+markers except the headings themselves, so `download_corpus` detects top-level
+` = Title = ` lines — exactly one `=` per side, since ` = = Section = = ` is the
+same article — and cuts there, recovering **29,444 articles** from a flat stream.
 
 ## Shuffle first, split second
 
-The corpus is a mixture, and each source is contiguous on disk: all the Python,
-then all the C++, then all the JavaScript, then all the prose. Take the last 0.5%
+The corpus is a mixture of 16 sources, and each is contiguous on disk: all the
+Python, then all the C++, then Wikipedia, then the how-to articles. Take the last 0.5%
 of the *token array* as validation — the obvious thing, and what a single-source
 pipeline gets away with — and the validation set is entirely whichever source
 landed last. You would be measuring prose loss and calling it val loss, and every
@@ -54,17 +54,17 @@ splits the shuffled list. Two properties follow:
 
 The seed is recorded in `meta.json`, so the split is reproducible across re-runs.
 
-## Validation has to be big enough to evaluate with
+## Validation has to be big enough to evaluate with, and no bigger
 
-`val_fraction` is a share of **documents**, not tokens, and the default is 4%.
-That is much larger than the 0.05% a big-corpus pipeline would use, for an
-arithmetic reason: a default eval pass samples `eval_iters * batch_size *
-block_size` = 100 × 32 × 256 ≈ **0.8M tokens**. A validation set smaller than that
-is being resampled several times per evaluation, and the "val loss" is noisier
-than its decimal places suggest. `prepare` prints a warning when it happens.
+A default eval pass samples `eval_iters * batch_size * block_size` = 100 x 32 x 256
+= **0.8M tokens**. A validation set smaller than that is resampled several times per
+evaluation, and the "val loss" is noisier than its decimal places suggest.
 
-At 37.8M tokens, 4% of documents is 1.28M val tokens. On a corpus ten times the
-size, lower it.
+A plain fraction is wrong at both ends. 0.5% of a 140 MB corpus is 0.17M tokens —
+too small to evaluate on. 4% of a 2.3 GB corpus is 24M tokens — training data thrown
+away for no extra signal. So `val_fraction` is a share of corpus *bytes*, clamped to
+4-16 MB, which lands at roughly 1M-4M validation tokens at any corpus size. The
+2.3 GB corpus holds out 16 MB across 7,763 documents, giving 4.25M val tokens.
 
 ## uint16, and re-opening the memmap
 
@@ -92,64 +92,74 @@ model to copy its input instead — hence the explicit check in
 
 ## What came out
 
-139 MB of Python, C++, JavaScript and Wikipedia prose, tokenized with the M1b
-32k code tokenizer:
+2.3 GB across 16 sources (see [`docs/corpus.md`](corpus.md)), tokenized with the
+M1b 32k code tokenizer:
 
 | source | tokens | share | bytes/token |
-|---|---|---|---|
-| python.txt | 17.1M | 45.3% | 3.51 |
-| prose.txt | 9.5M | 25.2% | 4.22 |
-| javascript.txt | 7.3M | 19.3% | 3.44 |
-| cpp.txt | 3.9M | 10.3% | 3.59 |
-| **total** | **37.8M** | | |
+|---|---:|---:|---:|
+| wikipedia | 156.0M | 25.6% | 3.86 |
+| python | 113.6M | 18.6% | 3.52 |
+| stackexchange | 44.6M | 7.3% | 3.38 |
+| web_edu | 44.0M | 7.2% | 4.34 |
+| python_github | 35.2M | 5.8% | 3.41 |
+| javascript | 33.4M | 5.5% | 3.55 |
+| wikihow | 32.2M | 5.3% | 4.98 |
+| code_qa | 24.9M | 4.1% | 4.02 |
+| go | 20.6M | 3.4% | 2.94 |
+| java | 20.1M | 3.3% | 3.99 |
+| openstax | 18.6M | 3.0% | 4.85 |
+| cpp | 18.3M | 3.0% | 3.26 |
+| php | 15.7M | 2.6% | 3.83 |
+| khanacademy | 14.8M | 2.4% | 4.05 |
+| rosetta | 10.8M | 1.8% | 2.81 |
+| ruby | 6.3M | 1.0% | 3.42 |
+| **total** | **609.3M** | 1,061,870 docs | 3.78 |
 
-36,078 documents → 36.5M train / 1.28M val. EOS appears 19,685 times in the first
-20M tokens against 19,103 expected from the document count — the boundaries
-survived. A decoded window comes back as real Python with its indentation intact,
-which is the round-trip check that would have caught the M1 whitespace bug.
+605.0M train / 4.25M val. EOS appears 34,372 times in the first 20M tokens against
+34,856 expected from the document count — the boundaries survived. A decoded window
+comes back as clean prose or as real code with its indentation intact, which is the
+round-trip check that would have caught the M1 whitespace bug.
 
-## The gap this exposes
+## Chinchilla, and how the corpus was sized
 
-Chinchilla's rule of thumb is ~20 tokens per parameter. 37.8M tokens is
-compute-optimal for a **1.9M-parameter** model, and tgpt's tiny config is
-**10.6M** — so this corpus is roughly 5× too small to train it properly.
-`prepare` prints that number on every run rather than leaving it to be discovered
-after a training run that plateaus early.
+Chinchilla's rule of thumb is ~20 tokens per parameter, and `prepare` prints the
+implied model size on every run rather than leaving it to be discovered after a
+training run that plateaus early.
 
-It is a corpus problem, not a pipeline problem, and closing it is one flag:
+The first corpus was 37.8M tokens — compute-optimal for a **1.9M**-parameter model,
+against a tiny config of **10.6M**. That is the gap that motivated the 2.3 GB
+rebuild. At 609.3M tokens the corpus is now compute-optimal for **30.5M**
+parameters, so the tiny config sits at ~57 tokens per parameter: comfortably
+over-trained, which is what you want for a small model — modern practice trains
+small models far past Chinchilla because inference cost, not training cost, is what
+they are optimized for.
 
-```bash
-# add the full 539 MB WikiText corpus alongside the code
-python -m scripts.prepare_data --sources 'data/code/*.txt' data/corpus.txt
-```
+It also means the corpus no longer caps the project. Scaling toward GPT-2-small
+(124M parameters, ~2.5B tokens) is `--total-mb` and patience, not a redesign.
 
-Scaling the *code* side is a matter of raising the per-language byte targets in
-`scripts/fetch_code_corpus.py`; the sources stream, so only the target changes.
-The spec's remaining model-corpus sources — StackOverflow, Medium, research
-papers, wikiHow, instruction manuals — are additional fetchers of the same shape:
-yield documents, and `_write_stream` handles the rest.
+## Shards are keyed to a tokenizer
 
-## Two shard sets, on purpose
-
-Shards are keyed to a tokenizer, so building both makes the M1-vs-M1b comparison
-measurable at the loss level rather than only in bytes per token:
-
-```bash
-python -m scripts.prepare_data                                   # -> data/shards
-python -m scripts.prepare_data --sources data/corpus.txt \
-    --tokenizer tokenizer/tgpt.model --out data/shards-wiki      # -> data/shards-wiki
-```
-
-| shard set | corpus | tokenizer | tokens | bytes/token |
-|---|---|---|---|---|
-| `data/shards` | 139 MB code + prose | M1b code, 32k | 37.8M | 3.68 |
-| `data/shards-wiki` | 539 MB WikiText-103 | M1 sentencepiece, 16k | 123.8M | 4.36 |
-
-`meta.json` records which tokenizer produced each set, and training reads it
+`meta.json` records which tokenizer produced a shard set, and training reads it
 instead of trusting a hardcoded `vocab_size` — a model built with the wrong
 vocabulary trains to a plausible-looking curve and generates noise.
 
-The 539 MB run is also the scale test: one file, 29,444 documents, tokenized and
-sharded in about a minute, with peak memory set by the batch of documents in
-flight rather than by the corpus. EOS lands 4,725 times in the first 20M tokens
-against 4,756 expected.
+Building a second set under a different tokenizer is how the M1-vs-M1b comparison
+becomes measurable at the loss level rather than only in bytes per token:
+
+```bash
+python -m scripts.prepare_data                                     # -> data/shards
+python -m scripts.prepare_data --tokenizer tokenizer/tgpt.model \
+    --out data/shards-sp                                           # -> data/shards-sp
+```
+
+Both read the same corpus and the same seed, so the document split is identical
+and only the tokenizer differs. Note that this doubles disk: 609M tokens is 1.2 GB
+per set.
+
+## Scale
+
+The 2.3 GB / 1.06M-document run indexes, shuffles, tokenizes and writes in a few
+minutes. Peak memory is set by the batch of documents in flight (1,024 at a time),
+not by the corpus, so the same code runs unchanged on a corpus that does not fit
+in RAM — which is the entire reason for the offset-index-then-stream design rather
+than the obvious "read it all, tokenize it, write it".

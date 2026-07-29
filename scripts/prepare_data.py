@@ -19,7 +19,7 @@ import os
 
 from tgpt.data import prepare
 
-DEFAULT_SOURCES = "data/code/*.txt"
+DEFAULT_SOURCES = "data/corpus/*.txt"
 CODE_TOKENIZER = "tokenizer/tgpt-code-32000.json"
 WIKI_TOKENIZER = "tokenizer/tgpt.model"
 
@@ -27,12 +27,12 @@ WIKI_TOKENIZER = "tokenizer/tgpt.model"
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sources", nargs="+", default=[DEFAULT_SOURCES],
-                    help="corpus files or globs (default: data/code/*.txt)")
+                    help="corpus files or globs (default: data/corpus/*.txt)")
     ap.add_argument("--tokenizer", default=None,
                     help=f"default: {CODE_TOKENIZER}, falling back to {WIKI_TOKENIZER}")
     ap.add_argument("--out", default="data/shards", help="output directory for the .bin shards")
-    ap.add_argument("--val-fraction", type=float, default=0.04,
-                    help="share of DOCUMENTS held out (not tokens); lower it as the corpus grows")
+    ap.add_argument("--val-fraction", type=float, default=0.01,
+                    help="share of corpus BYTES held out, clamped to 4-16 MB")
     ap.add_argument("--seed", type=int, default=1337)
     args = ap.parse_args()
 
@@ -45,7 +45,7 @@ def main():
     paths = sorted({p for pattern in args.sources for p in glob.glob(pattern)})
     if not paths:
         raise SystemExit(
-            f"no corpus files matched {args.sources} — run: python -m scripts.fetch_code_corpus"
+            f"no corpus files matched {args.sources} — run: python -m scripts.fetch_corpus"
         )
 
     prepare(paths, tokenizer, args.out, val_fraction=args.val_fraction, seed=args.seed)

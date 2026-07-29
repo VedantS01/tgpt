@@ -21,7 +21,7 @@ Without that, the model has no signal for "this text is finished", which is
 exactly what generation needs in order to stop.
 
 **Documents are shuffled before the train/val split, not after.** The corpus is a
-mixture (Python, C++, JavaScript, prose), and each source is contiguous on disk.
+mixture of many sources (see `tgpt/corpus.py`), and each is contiguous on disk.
 Slicing the last 0.5% of the *token array* as validation would hand you a
 validation set made entirely of whichever source happens to land last — you would
 be measuring one language and calling it the loss. Shuffling whole documents
@@ -51,6 +51,14 @@ _MAX_UINT16_VOCAB = 65536
 # TrainConfig's defaults sample eval_iters * batch_size * block_size = 100*32*256
 # tokens per evaluation. A validation set smaller than that is being resampled.
 _MIN_VAL_TOKENS = 100 * 32 * 256
+
+# The validation split is clamped to a byte range rather than left as a pure
+# fraction, because a fraction is wrong at both ends: 0.5% of a 140 MB corpus is
+# too small to evaluate on, and 4% of a 2.3 GB one is 24M tokens of training data
+# thrown away for no extra signal. At ~4 bytes/token these bound it to roughly
+# 1M-4M validation tokens, which is a few eval passes' worth at any corpus size.
+_VAL_MIN_BYTES = 4e6
+_VAL_MAX_BYTES = 16e6
 
 
 def download_corpus(out_path: str, source: str = "wikitext-103") -> str:
@@ -177,7 +185,7 @@ def prepare(
     corpus_path: str | list[str],
     tokenizer_path: str,
     out_dir: str,
-    val_fraction: float = 0.04,
+    val_fraction: float = 0.01,
     seed: int = 1337,
 ) -> dict:
     """Tokenize the corpus and write `train.bin` + `val.bin` (uint16) into `out_dir`.
@@ -211,9 +219,17 @@ def prepare(
     # Shuffle whole documents, then split. See the module docstring for why the
     # order of these two operations is the entire point.
     random.Random(seed).shuffle(docs)
-    n_val = max(1, int(len(docs) * val_fraction))
+    total_bytes = sum(d[2] for d in docs)
+    target = min(max(val_fraction * total_bytes, _VAL_MIN_BYTES), _VAL_MAX_BYTES)
+    acc = n_val = 0
+    for _, _, length in docs:
+        if acc >= target or n_val >= len(docs) - 1:
+            break
+        acc += length
+        n_val += 1
     val_docs, train_docs = docs[:n_val], docs[n_val:]
-    print(f"{len(docs):,} documents -> {len(train_docs):,} train / {len(val_docs):,} val")
+    print(f"{len(docs):,} documents ({total_bytes/1e6:.0f} MB) -> "
+          f"{len(train_docs):,} train / {len(val_docs):,} val ({acc/1e6:.1f} MB)")
 
     os.makedirs(out_dir, exist_ok=True)
     handles = [open(p, "rb") for p in paths]

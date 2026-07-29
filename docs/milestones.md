@@ -23,7 +23,7 @@ keywords whole, identifiers deliberately split. Kept *alongside* M1 rather than 
 so the two can be measured against each other.
 - **Build:** `build_pattern` (the pre-tokenization regex — where every requirement lives),
   `train_code_tokenizer`, `CodeTokenizer`, plus `tgpt/langspec.py` (the spec as data).
-- **Run:** `python -m scripts.fetch_code_corpus` → `python -m scripts.train_code_tokenizer`
+- **Run:** `python -m scripts.fetch_corpus` → `python -m scripts.train_code_tokenizer`
   → `python -m scripts.eval_tokenizer`.
 - **See:** bytes-per-token per language vs. the M1 baseline; a spec-compliance audit; exact
   round-trip on nasty inputs (CRLF, tabs, nested quotes, emoji in string literals).
@@ -31,16 +31,19 @@ so the two can be measured against each other.
   corpus bounds what any tokenizer can learn; how vocabulary size trades against model size.
 - **Read:** [`docs/tokenizer-design.md`](tokenizer-design.md).
 
-## M2 — Data pipeline  ·  `tgpt/data.py`
-Corpus → flat token array → `train.bin` / `val.bin` (uint16 memmap) → batched windows.
-- **Build:** `download_corpus`, `prepare`, `get_batch` (+ `load_meta`).
-- **Run:** `python -m scripts.prepare_data` → `data/shards/*.bin`, then
-  `python -m scripts.inspect_data` to look at what came out.
+## M2 — Data pipeline  ·  `tgpt/corpus.py`, `tgpt/data.py`
+Sources → corpus files → flat token array → `train.bin` / `val.bin` (uint16 memmap)
+→ batched windows.
+- **Build:** the source registry in `corpus.py`; `download_corpus`, `prepare`,
+  `get_batch` (+ `load_meta`) in `data.py`.
+- **Run:** `python -m scripts.fetch_corpus` → `python -m scripts.prepare_data` →
+  `data/shards/*.bin`, then `python -m scripts.inspect_data` to look at what came out.
 - **See:** the source mixture and its token counts; a decoded window; `y` proved to be
   `x` shifted by one; EOS landing at document boundaries.
 - **Learn:** memory-mapping, why uint16, document separators, why the train/val split
-  must happen *after* shuffling documents, the next-token target.
-- **Read:** [`docs/data-pipeline.md`](data-pipeline.md).
+  must happen *after* shuffling documents, the next-token target, and how to size a
+  corpus against the model you mean to train.
+- **Read:** [`docs/corpus.md`](corpus.md), [`docs/data-pipeline.md`](data-pipeline.md).
 
 ## M3 — Model (GPT-2 baseline)  ·  `tgpt/model.py`
 The faithful GPT-2 decoder: token + learned position embeddings, pre-norm blocks

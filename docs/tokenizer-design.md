@@ -126,38 +126,63 @@ essentially never occur in prose.
 
 ## Results
 
-Bytes per token on ~1 MB of held-out text per language that no tokenizer trained on.
-Higher is better; it is effective context length and inference cost per unit of code.
+Bytes per token on ~1 MB of held-out text per source that no tokenizer trained on.
+Higher is better; it is effective context length and inference cost per unit of text.
 
-| tokenizer | c++ | javascript | python | prose |
-|---|---|---|---|---|
-| M1 sentencepiece / wiki, 16k | 1.91 | 2.04 | 2.01 | **4.37** |
-| M1b byte-level / code, 16k | 3.07 | 3.59 | 3.37 | 3.84 |
-| M1b byte-level / code, 32k | **3.16** | **3.71** | **3.50** | 4.19 |
-| **32k vs baseline** | **+66%** | **+82%** | **+74%** | −4% |
+The middle column is the same design trained on the first corpus (139 MB: Python,
+C++, JS, WikiText). The right column is that design trained on the full 2.3 GB
+mixture (see [`docs/corpus.md`](corpus.md)). Holding the pre-tokenizer and the
+vocabulary size fixed across those two isolates **the corpus effect on its own**.
 
-The 16k row is the honest comparison, because it holds vocabulary size fixed and
-changes only the corpus and the pre-tokenizer: **+61% on C++, +76% on JS, +68% on
-Python, for −12% on prose.** Going to 32k buys another ~4% on code and wins most of
-the prose back. Put concretely: the same 256-token context window holds roughly
-two-thirds more C++.
+| held-out source | M1 sp/wikitext 16k | M1b bpe 32k, 139 MB | M1b bpe 32k, 2.3 GB |
+|---|---|---|---|
+| php | 1.83 | 3.55 | **3.68** |
+| javascript | 2.04 | 3.71 | **3.73** |
+| java | 1.93 | 3.49 | **3.50** |
+| python | 1.96 | 3.45 | **3.51** |
+| go | 1.79 | 3.12 | **3.25** |
+| c++ | 1.91 | **3.16** | 3.14 |
+| stackexchange | 3.20 | 3.71 | **4.00** |
+| wikihow | 3.93 | 4.53 | **5.00** |
+| openstax | 4.00 | 4.44 | **4.85** |
+| wikipedia | 3.99 | 4.07 | **4.25** |
+| web_edu | 4.00 | 4.18 | **4.32** |
+| **corpus-weighted mean** | 3.04 | 3.84 | **4.00** |
 
-Spec compliance, 32k: space ladder 8/8, identifiers-split 13/13, round-trip 11/11,
-JS keywords 51/51, Python keywords 37/38, C++ keywords 72/96.
+The mean is weighted by each source's share of the corpus, not a plain average: a
+tokenizer that wins on Ruby and loses on Python has not improved the thing the
+model will actually read.
 
-### Two honest caveats
+Spec compliance, 32k: space ladder **8/8 with nothing force-added** — the bigger
+corpus taught every rung on its own — identifiers-split 13/13, round-trip 11/11,
+operators 26/28, Python keywords 37/38, JS keywords 50/51, C++ keywords 70/96.
 
-**The prose regression is real.** The code tokenizer is ~4% worse on English than a
-Wikipedia-only SentencePiece model, and requirement 6 is a large part of why:
-splitting every identifier costs tokens, and single-digit numbers cost more. That is
-the price of the spec, and it is worth paying only because the model's corpus is
-meant to be code-heavy.
+### The prose regression is gone, and the corpus is why
 
-**The baseline got *worse* as it got more correct.** As originally written, the M1
-tokenizer scored 2.21 bytes/token on C++; once it stopped destroying whitespace it
-scored 1.91. Nothing regressed — it had been *deleting* the indentation it was being
-measured on, and deleted text compresses beautifully. A compression number means
-nothing without a round-trip check beside it.
+The first version of this tokenizer was **−4% on prose** against the
+Wikipedia-trained SentencePiece baseline. That was reported as the unavoidable
+price of the spec: requirement 6 splits every identifier, and single digits cost
+tokens.
+
+It was not unavoidable. It was a corpus artifact. Trained on 600 MB of Wikipedia
+and 500 MB of instructional prose instead of 40 MB of WikiText, the *same
+pre-tokenizer* now beats the SentencePiece baseline **on Wikipedia itself** (4.25
+vs 3.99, +6%) while keeping every bit of the code advantage. Requirement 6 still
+costs what it costs; there was simply far more headroom in the corpus than in the
+configuration.
+
+This is the same lesson as the opening section, arriving with a number attached:
+**a tokenizer only learns tokens for text it has seen.** The one thing that
+genuinely got worse is C++ (3.16 → 3.14), which is exactly what you would predict
+— C++ went from 10% of the corpus to 3%.
+
+### The baseline got *worse* as it got more correct
+
+As originally written, the M1 tokenizer scored 2.21 bytes/token on C++; once it
+stopped destroying whitespace it scored 1.91. Nothing regressed — it had been
+*deleting* the indentation it was being measured on, and deleted text compresses
+beautifully. A compression number means nothing without a round-trip check beside
+it.
 
 ### What the remaining misses mean
 

@@ -91,19 +91,42 @@ SPECIALS = ["<unk>", "<bos>", "<eos>"]
 UNK_ID, BOS_ID, EOS_ID = 0, 1, 2
 
 
-def _documents(corpus_files: list[str], block: int = 1 << 22):
-    """Stream `corpus_files` as documents, splitting on the corpus separator byte."""
+def _documents(corpus_files: list[str], caps: dict[str, float] | None = None,
+               block: int = 1 << 22):
+    """Stream `corpus_files` as documents, splitting on the corpus separator byte.
+
+    `caps` optionally limits how many bytes to read from each file, which is how
+    tokenizer training stays tractable on a corpus far larger than it needs.
+    """
     from .data import DOC_SEP
 
     for path in corpus_files:
-        buf = ""
+        cap = (caps or {}).get(path, float("inf"))
+        buf, n = "", 0
         with open(path, encoding="utf-8", errors="replace") as f:
-            while chunk := f.read(block):
+            while n < cap and (chunk := f.read(block)):
+                n += len(chunk)
                 buf += chunk
                 *done, buf = buf.split(DOC_SEP)
                 yield from (d for d in done if d)
         if buf:
             yield buf
+
+
+def sample_caps(corpus_files: list[str], sample_bytes: float | None) -> dict[str, float]:
+    """Per-file byte caps that sample `sample_bytes` total, proportional to file size.
+
+    Proportional rather than a flat per-file cap: the tokenizer should see the
+    corpus's actual mixture. A flat cap would give a 40 MB Ruby source the same
+    weight as a 400 MB Python one and quietly retune the vocabulary away from what
+    the model will actually be trained on.
+    """
+    sizes = {p: os.path.getsize(p) for p in corpus_files}
+    total = sum(sizes.values())
+    if not sample_bytes or total <= sample_bytes:
+        return {}
+    frac = sample_bytes / total
+    return {p: s * frac for p, s in sizes.items()}
 
 
 def train_code_tokenizer(
@@ -112,6 +135,7 @@ def train_code_tokenizer(
     vocab_size: int = 32000,
     split_digits: bool = True,
     min_frequency: int = 2,
+    sample_bytes: float | None = 300e6,
 ) -> str:
     """Train a byte-level BPE over `corpus_files` and save it to `out_path`."""
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
@@ -132,7 +156,15 @@ def train_code_tokenizer(
     # (see tgpt.data.DOC_SEP) and the tokenizer should never see that byte, or it
     # would spend merges learning it. Splitting here also stops BPE from learning
     # pairs that straddle two unrelated files.
-    tok.train_from_iterator(_documents(corpus_files), trainer)
+    #
+    # A tokenizer needs representative statistics, not volume — the merge ranking
+    # for a 32k vocabulary is settled long before 300 MB — so the corpus is
+    # subsampled proportionally rather than read whole.
+    caps = sample_caps(corpus_files, sample_bytes)
+    if caps:
+        print(f"sampling {sum(caps.values())/1e6:.0f} MB of "
+              f"{sum(os.path.getsize(p) for p in corpus_files)/1e6:.0f} MB for training")
+    tok.train_from_iterator(_documents(corpus_files, caps), trainer)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     tok.save(out_path)
