@@ -80,26 +80,41 @@ def main():
     toks: list[tuple[str, object]] = []
     sp = "tokenizer/tgpt.model"
     if os.path.exists(sp):
-        toks.append(("M1 sentencepiece/wiki 16k", Tokenizer(sp)))
+        toks.append(("M1 sp/wikitext16k", Tokenizer(sp)))
     for f in sorted(os.listdir("tokenizer")):
         if f.startswith("tgpt-code-") and f.endswith(".json"):
-            toks.append((f"M1b bytelevel/code {f[10:-5]}", CodeTokenizer(f"tokenizer/{f}")))
+            # "32000" -> "32k"; a "-v1" suffix marks a tokenizer kept from an
+            # earlier, smaller corpus so the corpus effect stays visible.
+            tag = f[10:-5]
+            vocab, _, suffix = tag.partition("-")
+            label = f"M1b bpe {int(vocab)//1000}k" + (f" {suffix}" if suffix else "")
+            toks.append((label, CodeTokenizer(f"tokenizer/{f}")))
 
     print("=" * 78)
     print("1. COMPRESSION — bytes per token on held-out text (higher is better)")
     print("=" * 78)
+    # Rows are sources, columns are tokenizers: the corpus has many more sources
+    # than there are tokenizers to compare, so this is the orientation that fits.
     langs = sorted(x.replace(".txt", "") for x in os.listdir(HELDOUT_DIR))
-    print(f"{'tokenizer':<30}" + "".join(f"{l:>11}" for l in langs))
-    base = None
-    for name, tok in toks:
-        c = compression(tok, name)
-        if base is None:
-            base = c
-        print(f"{name:<30}" + "".join(f"{c[l]:>11.2f}" for l in langs))
-    if len(toks) > 1:
-        last = compression(toks[-1][1], "")
-        print(f"{'  vs baseline':<30}" + "".join(
-            f"{(last[l]/base[l]-1)*100:>+10.0f}%" for l in langs))
+    cols = [compression(tok, name) for name, tok in toks]
+    print(f"{'held-out source':<18}" + "".join(f"{n[:16]:>18}" for n, _ in toks)
+          + ("        vs base" if len(toks) > 1 else ""))
+    for lang in langs:
+        row = f"{lang:<18}" + "".join(f"{c[lang]:>18.2f}" for c in cols)
+        if len(toks) > 1:
+            row += f"{(cols[-1][lang]/cols[0][lang]-1)*100:>+14.0f}%"
+        print(row)
+    # A corpus-weighted mean, not a plain one: a tokenizer that wins on Ruby and
+    # loses on Python has not improved the thing the model will actually read.
+    weights = {l: os.path.getsize(os.path.join("data/corpus", l + ".txt"))
+               for l in langs if os.path.exists(os.path.join("data/corpus", l + ".txt"))}
+    if weights:
+        tot = sum(weights.values())
+        means = [sum(c[l] * w for l, w in weights.items()) / tot for c in cols]
+        row = f"{'weighted mean':<18}" + "".join(f"{m:>18.2f}" for m in means)
+        if len(toks) > 1:
+            row += f"{(means[-1]/means[0]-1)*100:>+14.0f}%"
+        print(row)
 
     for name, tok in toks:
         print("\n" + "=" * 78)
