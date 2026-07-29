@@ -19,6 +19,16 @@ Implement the three pieces below. The rest of the project depends only on this i
 from __future__ import annotations
 import os
 
+# Special-token ids, fixed here so every stage of the pipeline agrees on them.
+# GPT-style models don't pad (training windows are always full), so pad is disabled.
+# <unk> must exist even with byte_fallback — SentencePiece requires it — but byte
+# fallback means it essentially never fires: unknown characters decompose into the
+# 256 byte tokens instead of collapsing into a lossy <unk>.
+PAD_ID = -1   # disabled
+UNK_ID = 0
+BOS_ID = 1
+EOS_ID = 2    # doubles as the document separator in the data pipeline (M2)
+
 
 def train_tokenizer(
     corpus_path: str,
@@ -27,23 +37,28 @@ def train_tokenizer(
     model_type: str = "bpe",          # "bpe" matches the GPT lineage; "unigram" is SP's default
     character_coverage: float = 0.9995,
 ) -> str:
-    """Train a SentencePiece model on a plain-text corpus and return the .model path.
+    """Train a SentencePiece model on a plain-text corpus and return the .model path."""
+    import sentencepiece as spm
 
-    TODO(M1):
-      - import sentencepiece as spm
-      - call spm.SentencePieceTrainer.train(...) with:
-            input=corpus_path, model_prefix=model_prefix, vocab_size=vocab_size,
-            model_type=model_type, character_coverage=character_coverage,
-            byte_fallback=True,          # any unknown char decomposes to bytes (no <unk> loss)
-            pad_id=..., unk_id=..., bos_id=..., eos_id=...,   # decide your special-token ids
-        Consider input_sentence_size / shuffle_input_sentence for very large corpora
-        (SentencePiece subsamples internally — you do not need the whole corpus to train).
-      - return f"{model_prefix}.model"
-
-    Returns the path to the trained .model file.
-    """
-    # TODO(M1): implement
-    raise NotImplementedError("M1: train the SentencePiece model")
+    spm.SentencePieceTrainer.train(
+        input=corpus_path,
+        model_prefix=model_prefix,
+        vocab_size=vocab_size,
+        model_type=model_type,
+        character_coverage=character_coverage,
+        byte_fallback=True,
+        pad_id=PAD_ID,
+        unk_id=UNK_ID,
+        bos_id=BOS_ID,
+        eos_id=EOS_ID,
+        # BPE training holds its working set in RAM, so subsample: 10M sentences
+        # drawn uniformly from the corpus is far more than enough signal for a
+        # 16k-merge vocabulary, and keeps training fast on a laptop.
+        input_sentence_size=10_000_000,
+        shuffle_input_sentence=True,
+        num_threads=os.cpu_count(),
+    )
+    return f"{model_prefix}.model"
 
 
 class Tokenizer:
@@ -54,27 +69,25 @@ class Tokenizer:
             raise FileNotFoundError(
                 f"{model_path} not found — train it first (scripts/train_tokenizer.py)."
             )
-        # TODO(M1): load the model
-        #   import sentencepiece as spm
-        #   self.sp = spm.SentencePieceProcessor(model_file=model_path)
-        raise NotImplementedError("M1: load the SentencePiece model")
+        import sentencepiece as spm
+
+        self.sp = spm.SentencePieceProcessor(model_file=model_path)
+        self.bos_id = self.sp.bos_id()
+        self.eos_id = self.sp.eos_id()
 
     @property
     def vocab_size(self) -> int:
-        # TODO(M1): return self.sp.get_piece_size()
-        raise NotImplementedError
+        return self.sp.get_piece_size()
 
     def encode(self, text: str, add_bos: bool = False, add_eos: bool = False) -> list[int]:
-        """Text -> list of token ids.
-
-        TODO(M1): return self.sp.encode(text, out_type=int) and, if requested, prepend
-        bos / append eos. (Document separators matter for the data pipeline in M2.)
-        """
-        raise NotImplementedError
+        """Text -> list of token ids."""
+        ids = self.sp.encode(text, out_type=int)
+        if add_bos:
+            ids = [self.bos_id] + ids
+        if add_eos:
+            ids = ids + [self.eos_id]
+        return ids
 
     def decode(self, ids: list[int]) -> str:
-        """List of token ids -> text.
-
-        TODO(M1): return self.sp.decode(ids).
-        """
-        raise NotImplementedError
+        """List of token ids -> text (special tokens are dropped by SentencePiece)."""
+        return self.sp.decode(ids)

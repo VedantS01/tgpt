@@ -26,18 +26,37 @@ def download_corpus(out_path: str, source: str = "wikitext-103") -> str:
     Start small for the first end-to-end run, then scale the corpus without changing
     anything downstream.
 
-    TODO(M2):
-      - "wikitext-103": from datasets import load_dataset;
-                        ds = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
-                        write the article text to out_path (one stream of text).
-      - "wikipedia":    load_dataset("wikimedia/wikipedia", "20231101.en") for the full dump
-                        (large — take a slice for the laptop phase).
-      - Decide how to separate documents (e.g. a blank line, or a BOS/EOS token at tokenize time)
-        so the model learns document boundaries.
+    WikiText-103 ships as one line per paragraph, with article headings as their own
+    lines (" = Title = "). We write the lines through as-is: the text stays one stream,
+    headings mark where articles begin, and the tokenize step (M2) inserts an EOS token
+    between documents so the model can learn boundaries.
 
     Returns out_path.
     """
-    raise NotImplementedError("M2: download the corpus")
+    from datasets import load_dataset
+
+    if source == "wikitext-103":
+        ds = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1", split="train")
+    elif source == "wikipedia":
+        # The full dump is ~20GB of text — slice it for the laptop phase.
+        ds = load_dataset("wikimedia/wikipedia", "20231101.en", split="train[:2%]")
+    else:
+        raise ValueError(f"unknown corpus source: {source}")
+
+    tmp_path = out_path + ".tmp"
+    n_chars = 0
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        for row in ds:
+            text = row["text"]
+            if not text.strip():
+                continue
+            f.write(text)
+            if not text.endswith("\n"):
+                f.write("\n")
+            n_chars += len(text)
+    os.replace(tmp_path, out_path)  # atomic: no half-written corpus if interrupted
+    print(f"corpus written -> {out_path} ({n_chars/1e6:.0f}M chars)")
+    return out_path
 
 
 def prepare(corpus_path: str, tokenizer_path: str, out_dir: str, val_fraction: float = 0.0005) -> None:
