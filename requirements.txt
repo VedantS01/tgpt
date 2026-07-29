@@ -5,6 +5,10 @@ numpy
 # tokenizer (Milestone 1)
 sentencepiece
 
+# code-aware byte-level BPE (Milestone 1b). Note: this matches with Oniguruma,
+# so the pre-tokenization regex may use lookarounds and possessive quantifiers.
+tokenizers
+
 # corpus download (Milestone 2) — HuggingFace datasets for Wikipedia / WikiText
 datasets
 
